@@ -1,11 +1,13 @@
-import torch 
+import torch
 import torch.nn as nn
 import torchvision
 import torchvision.transforms as transforms
-
+import time
+import argparse
 
 # Device configuration
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+#device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cpu')
 
 # Hyper-parameters
 sequence_length = 28
@@ -19,21 +21,21 @@ learning_rate = 0.01
 
 # MNIST dataset
 train_dataset = torchvision.datasets.MNIST(root='../../data/',
-                                           train=True, 
+                                           train=True,
                                            transform=transforms.ToTensor(),
                                            download=True)
 
 test_dataset = torchvision.datasets.MNIST(root='../../data/',
-                                          train=False, 
+                                          train=False,
                                           transform=transforms.ToTensor())
 
 # Data loader
 train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
-                                           batch_size=batch_size, 
+                                           batch_size=batch_size,
                                            shuffle=True)
 
 test_loader = torch.utils.data.DataLoader(dataset=test_dataset,
-                                          batch_size=batch_size, 
+                                          batch_size=batch_size,
                                           shuffle=False)
 
 # Recurrent neural network (many-to-one)
@@ -44,15 +46,15 @@ class RNN(nn.Module):
         self.num_layers = num_layers
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
         self.fc = nn.Linear(hidden_size, num_classes)
-    
+
     def forward(self, x):
-        # Set initial hidden and cell states 
-        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(device) 
+        # Set initial hidden and cell states
+        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(device)
         c0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(device)
-        
+
         # Forward propagate LSTM
         out, _ = self.lstm(x, (h0, c0))  # out: tensor of shape (batch_size, seq_length, hidden_size)
-        
+
         # Decode the hidden state of the last time step
         out = self.fc(out[:, -1, :])
         return out
@@ -67,22 +69,33 @@ optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 # Train the model
 total_step = len(train_loader)
 for epoch in range(num_epochs):
+    batch_time_sum = 0
+    batch_time_start = time.time()
+    processed_batches = 0
     for i, (images, labels) in enumerate(train_loader):
         images = images.reshape(-1, sequence_length, input_size).to(device)
         labels = labels.to(device)
-        
+
         # Forward pass
         outputs = model(images)
         loss = criterion(outputs, labels)
-        
+
         # Backward and optimize
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        
+
+        batch_time = time.time() - batch_time_start
+        batch_time_sum += batch_time
+        processed_batches += 1
+
         if (i+1) % 100 == 0:
-            print ('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}' 
-                   .format(epoch+1, num_epochs, i+1, total_step, loss.item()))
+            print ('Epoch [{}/{}], Step [{}/{}], Average time: {:.6f}, Loss: {:.4f}'
+                   .format(epoch+1, num_epochs, i+1, total_step, batch_time_sum / processed_batches, loss.item()))
+            batch_time_sum = 0
+            processed_batches = 0
+
+        batch_time_start = time.time()
 
 # Test the model
 with torch.no_grad():
@@ -96,7 +109,7 @@ with torch.no_grad():
         total += labels.size(0)
         correct += (predicted == labels).sum().item()
 
-    print('Test Accuracy of the model on the 10000 test images: {} %'.format(100 * correct / total)) 
+    print('Test Accuracy of the model on the 10000 test images: {} %'.format(100 * correct / total))
 
 # Save the model checkpoint
 torch.save(model.state_dict(), 'model.ckpt')
