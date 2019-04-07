@@ -1,4 +1,4 @@
-print('Importing modules...')
+print('Importing modules...', flush=True)
 import argparse
 import torch
 import torch.nn as nn
@@ -36,21 +36,21 @@ class Worker:
         / (self.n_gpus * self.n_nodes))
     self.batch_size = self.cpu_batch_size if self.dist.is_cpu_rank() else self.gpu_batch_size
 
-    print("[Rank {}] Current CUDA device: {}".format(self.rank, torch.cuda.current_device()))
+    print("[Rank {}] Current CUDA device: {}".format(self.rank, torch.cuda.current_device()), flush=True)
 
   def init_dist(self):
     # C++ extension module with JIT compilation
     dist_module = load(name="dist", sources=["dist.cu"], verbose=True, with_cuda=True,
         extra_cuda_cflags=['-ccbin', 'g++', '-std=c++11', '-O3',
-          '-I/usr/mpi/gcc/openmpi-2.1.2-hfi/include',
+          #'-I/usr/mpi/gcc/openmpi-2.1.2-hfi/include',
           #'-I/usr/mpi/gcc/mvapich2-2.3b-hfi/include',
-          #'-I/opt/intel/compilers_and_libraries_2017.4.196/linux/mpi/intel64/include',
+          '-I/opt/intel/compilers_and_libraries_2017.4.196/linux/mpi/intel64/include',
           #'-I/opt/intel/compilers_and_libraries_2017.4.196/linux/mpi/include64',
           '-I/pylon5/ac7k4vp/jchoi157/pytorch/build/nccl/include'],
         extra_ldflags=['-L/opt/packages/cuda/9.2/lib64', '-lcudart', '-lrt',
-          '-L/usr/mpi/gcc/openmpi-2.1.2-hfi/lib64', '-lmpi',
+          #'-L/usr/mpi/gcc/openmpi-2.1.2-hfi/lib64', '-lmpi',
           #'-L/usr/mpi/gcc/mvapich2-2.3b-hfi/lib', '-lmpi',
-          #'-L/opt/intel/compilers_and_libraries_2017.4.196/linux/mpi/intel64/lib', '-lmpi',
+          '-L/opt/intel/compilers_and_libraries_2017.4.196/linux/mpi/intel64/lib', '-lmpi',
           #'-L/opt/intel/compilers_and_libraries_2017.4.196/linux/mpi/lib64', '-lmpi',
           '-L/pylon5/ac7k4vp/jchoi157/pytorch/build/nccl/lib', '-lnccl'],
         build_directory="/home/jchoi157/torch_extensions"
@@ -95,7 +95,7 @@ class Worker:
                              self.gpu_batch_size, self.batch_size, shuffle=True)
     self.num_batches = len(data_loader)
     print("[Rank {}] batch size {}, num batches {}".format(self.rank, self.batch_size,
-      self.num_batches))
+      self.num_batches), flush=True)
 
     # Build the models
     self.encoder = EncoderCNN(args.embed_size)
@@ -139,7 +139,7 @@ class Worker:
         # Print log info
         if i % args.log_step == 0:
           print('Rank [{}], Epoch [{}/{}], Step [{}/{}], Average time: {:.6f}, Loss: {:.4f}, Perplexity: {:5.4f}'
-                  .format(self.rank, epoch, args.num_epochs, i, total_step, batch_time_sum / processed_batches, loss.item(), np.exp(loss.item())))
+                  .format(self.rank, epoch, args.num_epochs, i, total_step, batch_time_sum / processed_batches, loss.item(), np.exp(loss.item())), flush=True)
           batch_time_sum = 0
           processed_batches = 0
 
@@ -175,7 +175,7 @@ def main():
   parser.add_argument('-g', '--gpu-only', action='store_true', default=False, help="use only GPUs for training")
 
   args = parser.parse_args()
-  print(args)
+  print(args, flush=True)
 
   # Set RNG seed so that calls to rand() are reproducible
   torch.manual_seed(1234)
