@@ -72,7 +72,7 @@ struct DistManager {
   int n_nodes;
   int n_gpus;
 
-  DistManager() {
+  DistManager(bool gpu_only) {
     local_rank = 0;
     local_size = 0;
 
@@ -88,8 +88,8 @@ struct DistManager {
     MPI_CHECK(MPI_Allgather(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, hostHashs,
           sizeof(uint64_t), MPI_BYTE, MPI_COMM_WORLD));
     for (int p = 0; p < world_size; p++) {
-       if (p == rank) break;
-       if (hostHashs[p] == hostHashs[rank]) local_rank++;
+      if (p == rank) break;
+      if (hostHashs[p] == hostHashs[rank]) local_rank++;
     }
     for (int p = 0; p < world_size; p++) {
       if (hostHashs[p] == hostHashs[rank]) local_size++;
@@ -108,13 +108,15 @@ struct DistManager {
         rank, world_size, local_rank, local_size, n_nodes, n_gpus);
 
     // Create communicators for intra-node and inter-node communication
-    MPI_CHECK(MPI_Comm_split(MPI_COMM_WORLD, floor(rank / local_size), rank, &intra_comm));
-    MPI_CHECK(MPI_Comm_group(MPI_COMM_WORLD, &world_group));
-    int* inter_ranks = (int*)malloc(sizeof(int) * n_nodes);
-    for (int i = 0; i < n_nodes; i++)
-      inter_ranks[i] = i * local_size + n_gpus;
-    MPI_CHECK(MPI_Group_incl(world_group, n_nodes, inter_ranks, &inter_group));
-    MPI_CHECK(MPI_Comm_create_group(MPI_COMM_WORLD, inter_group, 0, &inter_comm));
+    if (!gpu_only) {
+      MPI_CHECK(MPI_Comm_split(MPI_COMM_WORLD, floor(rank / local_size), rank, &intra_comm));
+      MPI_CHECK(MPI_Comm_group(MPI_COMM_WORLD, &world_group));
+      int* inter_ranks = (int*)malloc(sizeof(int) * n_nodes);
+      for (int i = 0; i < n_nodes; i++)
+        inter_ranks[i] = i * local_size + n_gpus;
+      MPI_CHECK(MPI_Group_incl(world_group, n_nodes, inter_ranks, &inter_group));
+      MPI_CHECK(MPI_Comm_create_group(MPI_COMM_WORLD, inter_group, 0, &inter_comm));
+    }
 
     // Initialize NCCL
     int gpu_rank = ((rank - local_rank) / local_size * n_gpus) + local_rank;
@@ -215,7 +217,7 @@ struct DistManager {
 
 PYBIND11_MODULE(dist, m) {
   py::class_<DistManager>(m, "DistManager")
-    .def(py::init())
+    .def(py::init<bool>())
     .def("get_rank", &DistManager::get_rank)
     .def("get_world_size", &DistManager::get_world_size)
     .def("get_local_rank", &DistManager::get_local_rank)

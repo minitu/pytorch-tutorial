@@ -85,7 +85,7 @@ def collate_fn(data):
         targets[i, :end] = cap[:end]        
     return images, targets, lengths
 
-def get_loader(root, json, vocab, transform, rank, world_size, local_size, n_gpus, total_batch_size, cpu_batch_size, gpu_batch_size, batch_size, shuffle):
+def get_loader(root, json, vocab, transform, rank, world_size, local_size, n_gpus, total_batch_size, cpu_batch_size, gpu_batch_size, batch_size, shuffle, no_partition):
     """Returns torch.utils.data.DataLoader for custom coco dataset."""
     # COCO caption dataset
     coco = CocoDataset(root=root,
@@ -102,8 +102,8 @@ def get_loader(root, json, vocab, transform, rank, world_size, local_size, n_gpu
     # images: a tensor of shape (batch_size, 3, 224, 224).
     # captions: a tensor of shape (batch_size, padded_length).
     # lengths: a list indicating valid length for each caption. length is (batch_size).
-    data_loader = torch.utils.data.DataLoader(dataset=partition,
-                                              batch_size=batch_size,
+    data_loader = torch.utils.data.DataLoader(dataset=(coco if no_partition else partition),
+                                              batch_size=(total_batch_size if no_partition else batch_size),
                                               shuffle=shuffle,
                                               collate_fn=collate_fn,
                                               pin_memory=True)
