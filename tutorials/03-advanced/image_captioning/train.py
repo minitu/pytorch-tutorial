@@ -28,7 +28,6 @@ class Worker:
     self.n_gpu_workers = self.n_gpus * self.n_nodes
 
     # Calculate batch sizes
-    '''
     self.total_batch_size = args.batch_size
     self.cpu_batch_size = args.cpu_batch_size
     assert ((self.total_batch_size - self.cpu_batch_size * self.n_cpu_workers * self.n_nodes) \
@@ -36,27 +35,41 @@ class Worker:
     self.gpu_batch_size = int((self.total_batch_size - self.cpu_batch_size * self.n_cpu_workers * self.n_nodes) \
         / (self.n_gpus * self.n_nodes))
     self.batch_size = self.cpu_batch_size if self.dist.is_cpu_rank() else self.gpu_batch_size
-    '''
-    self.batch_size = args.batch_size
 
     print("[Rank {}] Current CUDA device: {}".format(self.rank, torch.cuda.current_device()))
 
   def init_dist(self):
     # C++ extension module with JIT compilation
     dist_module = load(name="dist", sources=["dist.cu"], verbose=True, with_cuda=True,
-        extra_cuda_cflags=['-ccbin', 'icpc', '-std=c++11', '-O3',
-          #'-I/usr/mpi/gcc/openmpi-2.1.2-hfi/include',
+        extra_cuda_cflags=['-ccbin', 'g++', '-std=c++11', '-O3',
+          '-I/usr/mpi/gcc/openmpi-2.1.2-hfi/include',
           #'-I/usr/mpi/gcc/mvapich2-2.3b-hfi/include',
-          '-I/opt/intel/compilers_and_libraries_2017.4.196/linux/mpi/intel64/include',
+          #'-I/opt/intel/compilers_and_libraries_2017.4.196/linux/mpi/intel64/include',
+          #'-I/opt/intel/compilers_and_libraries_2017.4.196/linux/mpi/include64',
           '-I/pylon5/ac7k4vp/jchoi157/pytorch/build/nccl/include'],
         extra_ldflags=['-L/opt/packages/cuda/9.2/lib64', '-lcudart', '-lrt',
-          #'-L/usr/mpi/gcc/openmpi-2.1.2-hfi/lib64', '-lmpi',
+          '-L/usr/mpi/gcc/openmpi-2.1.2-hfi/lib64', '-lmpi',
           #'-L/usr/mpi/gcc/mvapich2-2.3b-hfi/lib', '-lmpi',
-          '-L/opt/intel/compilers_and_libraries_2017.4.196/linux/mpi/intel64/lib', '-lmpi',
+          #'-L/opt/intel/compilers_and_libraries_2017.4.196/linux/mpi/intel64/lib', '-lmpi',
+          #'-L/opt/intel/compilers_and_libraries_2017.4.196/linux/mpi/lib64', '-lmpi',
           '-L/pylon5/ac7k4vp/jchoi157/pytorch/build/nccl/lib', '-lnccl'],
         build_directory="/home/jchoi157/torch_extensions"
         )
     self.dist = dist_module.DistManager()
+
+  def average_gradients(self):
+    # Only all-reduce decoder parameters since encoder is pre-trained
+    for param in self.decoder.parameters():
+      if self.dist.is_cpu_rank():
+        param.grad.data = param.grad.data.cuda(0, non_blocking=True)
+        param.grad.data *= (self.cpu_batch_size / self.total_batch_size)
+      else:
+        param.grad.data *= (self.gpu_batch_size / self.total_batch_size)
+
+      self.dist.hetero_allreduce(param.grad.data)
+
+      if self.dist.is_cpu_rank():
+        param.grad.data = param.grad.data.cpu()
 
   def train(self, args):
     # Create model directory
@@ -77,19 +90,23 @@ class Worker:
 
     # Build data loader
     data_loader = get_loader(args.image_dir, args.caption_path, vocab,
-                             transform, self.batch_size,
-                             shuffle=True)
+                             transform, self.rank, self.world_size, self.local_size,
+                             self.n_gpus, self.total_batch_size, self.cpu_batch_size,
+                             self.gpu_batch_size, self.batch_size, shuffle=True)
+    self.num_batches = len(data_loader)
+    print("[Rank {}] batch size {}, num batches {}".format(self.rank, self.batch_size,
+      self.num_batches))
 
     # Build the models
-    encoder = EncoderCNN(args.embed_size)
-    decoder = DecoderRNN(args.embed_size, args.hidden_size, len(vocab), args.num_layers)
+    self.encoder = EncoderCNN(args.embed_size)
+    self.decoder = DecoderRNN(args.embed_size, args.hidden_size, len(vocab), args.num_layers)
     if self.dist.is_gpu_rank():
-      encoder = encoder.cuda(self.local_rank)
-      decoder = decoder.cuda(self.local_rank)
+      self.encoder = self.encoder.cuda(self.local_rank)
+      self.decoder = self.decoder.cuda(self.local_rank)
 
     # Loss and optimizer
     criterion = nn.CrossEntropyLoss()
-    params = list(decoder.parameters()) + list(encoder.linear.parameters()) + list(encoder.bn.parameters())
+    params = list(self.decoder.parameters()) + list(self.encoder.linear.parameters()) + list(self.encoder.bn.parameters())
     optimizer = torch.optim.Adam(params, lr=args.learning_rate)
 
     # Train the models
@@ -105,13 +122,14 @@ class Worker:
           captions = captions.cuda(self.local_rank)
         targets = pack_padded_sequence(captions, lengths, batch_first=True)[0]
 
-        # Forward, backward and optimize
-        features = encoder(images)
-        outputs = decoder(features, captions, lengths)
+        # Forward, backward, all-reduce and optimize
+        features = self.encoder(images)
+        outputs = self.decoder(features, captions, lengths)
         loss = criterion(outputs, targets)
-        decoder.zero_grad()
-        encoder.zero_grad()
+        self.decoder.zero_grad()
+        self.encoder.zero_grad()
         loss.backward()
+        self.average_gradients()
         optimizer.step()
 
         batch_time = time.time() - batch_start_time
@@ -127,9 +145,9 @@ class Worker:
 
         # Save the model checkpoints
         if (i+1) % args.save_step == 0:
-          torch.save(decoder.state_dict(), os.path.join(
+          torch.save(self.decoder.state_dict(), os.path.join(
             args.model_path, 'decoder-{}-{}.ckpt'.format(epoch+1, i+1)))
-          torch.save(encoder.state_dict(), os.path.join(
+          torch.save(self.encoder.state_dict(), os.path.join(
             args.model_path, 'encoder-{}-{}.ckpt'.format(epoch+1, i+1)))
 
         batch_start_time = time.time()

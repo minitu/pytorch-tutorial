@@ -8,6 +8,7 @@ import nltk
 from PIL import Image
 from build_vocab import Vocabulary
 from pycocotools.coco import COCO
+from partition_hetero import DataPartitioner
 
 
 class CocoDataset(data.Dataset):
@@ -84,21 +85,26 @@ def collate_fn(data):
         targets[i, :end] = cap[:end]        
     return images, targets, lengths
 
-def get_loader(root, json, vocab, transform, batch_size, shuffle):
+def get_loader(root, json, vocab, transform, rank, world_size, local_size, n_gpus, total_batch_size, cpu_batch_size, gpu_batch_size, batch_size, shuffle):
     """Returns torch.utils.data.DataLoader for custom coco dataset."""
     # COCO caption dataset
     coco = CocoDataset(root=root,
                        json=json,
                        vocab=vocab,
                        transform=transform)
-    
+
+    # Divide the dataset among workers
+    partition = DataPartitioner(coco, rank, world_size, local_size, n_gpus, total_batch_size, cpu_batch_size, gpu_batch_size)
+    partition = partition.use(rank)
+
     # Data loader for COCO dataset
     # This will return (images, captions, lengths) for each iteration.
     # images: a tensor of shape (batch_size, 3, 224, 224).
     # captions: a tensor of shape (batch_size, padded_length).
     # lengths: a list indicating valid length for each caption. length is (batch_size).
-    data_loader = torch.utils.data.DataLoader(dataset=coco, 
+    data_loader = torch.utils.data.DataLoader(dataset=partition,
                                               batch_size=batch_size,
                                               shuffle=shuffle,
-                                              collate_fn=collate_fn)
+                                              collate_fn=collate_fn,
+                                              pin_memory=True)
     return data_loader
