@@ -6,7 +6,7 @@ import numpy as np
 import os
 import pickle
 import time
-from data_loader import get_loader
+from data_loader_single import get_loader
 from build_vocab import Vocabulary
 from model import EncoderCNN, DecoderRNN
 from torch.nn.utils.rnn import pack_padded_sequence
@@ -15,30 +15,20 @@ from torch.utils.cpp_extension import load
 
 class Worker:
   def __init__(self, args):
-    # Initialize MPI/NCCL and set topology variables
-    self.init_dist(args.gpu_only)
-    self.rank = self.dist.get_rank()
-    self.world_size = self.dist.get_world_size()
-    self.local_rank = self.dist.get_local_rank()
-    self.local_size = self.dist.get_local_size()
-    self.n_gpus = self.dist.get_n_gpus()
-    self.n_nodes = self.world_size / self.local_size
-    self.node = self.rank // self.local_size
-    self.n_cpu_workers = (self.local_size - self.n_gpus) * self.n_nodes
-    self.n_gpu_workers = self.n_gpus * self.n_nodes
+    self.batch_size = args.batch_size
+    self.use_gpu = args.use_gpu
+    self.use_mpi = args.use_mpi
+    if self.use_mpi:
+      self.init_dist()
 
-    # Calculate batch sizes
-    self.total_batch_size = args.batch_size
-    self.cpu_batch_size = args.cpu_batch_size
-    assert ((self.total_batch_size - self.cpu_batch_size * self.n_cpu_workers * self.n_nodes) \
-        % (self.n_gpus * self.n_nodes) == 0), "GPU batch size is not an integer"
-    self.gpu_batch_size = int((self.total_batch_size - self.cpu_batch_size * self.n_cpu_workers * self.n_nodes) \
-        / (self.n_gpus * self.n_nodes))
-    self.batch_size = self.cpu_batch_size if self.dist.is_cpu_rank() else self.gpu_batch_size
+    if self.use_gpu:
+      print("Current CUDA device: {}".format(torch.cuda.current_device()), flush=True)
+    else:
+      num_threads = 32
+      torch.set_num_threads(num_threads)
+      print("Setting number of threads: {}".format(num_threads, flush=True))
 
-    print("[Rank {}] Current CUDA device: {}".format(self.rank, torch.cuda.current_device()), flush=True)
-
-  def init_dist(self, gpu_only):
+  def init_dist(self):
     # C++ extension module with JIT compilation
     dist_module = load(name="dist", sources=["dist.cu"], verbose=True, with_cuda=True,
         extra_cuda_cflags=['-ccbin', 'g++', '-std=c++11', '-O3',
@@ -55,21 +45,7 @@ class Worker:
           '-L/pylon5/ac7k4vp/jchoi157/pytorch/build/nccl/lib', '-lnccl'],
         build_directory="/home/jchoi157/torch_extensions"
         )
-    self.dist = dist_module.DistManager(gpu_only, False)
-
-  def average_gradients(self):
-    # Only all-reduce decoder parameters since encoder is pre-trained
-    for param in self.decoder.parameters():
-      if self.dist.is_cpu_rank():
-        param.grad.data = param.grad.data.cuda(0, non_blocking=True)
-        param.grad.data *= (self.cpu_batch_size / self.total_batch_size)
-      else:
-        param.grad.data *= (self.gpu_batch_size / self.total_batch_size)
-
-      self.dist.hetero_allreduce(param.grad.data)
-
-      if self.dist.is_cpu_rank():
-        param.grad.data = param.grad.data.cpu()
+    self.dist = dist_module.DistManager(True, True)
 
   def train(self, args):
     # Create model directory
@@ -90,21 +66,16 @@ class Worker:
 
     # Build data loader
     data_loader = get_loader(args.image_dir, args.caption_path, vocab,
-                             transform, self.rank, self.world_size, self.local_size,
-                             self.n_gpus, self.total_batch_size, self.cpu_batch_size,
-                             self.gpu_batch_size, self.batch_size, shuffle=True,
-                             no_partition = args.no_partition)
+                             transform, self.batch_size, shuffle=True)
     self.num_batches = len(data_loader)
-    print("[Rank {}] batch size {}, num batches {}".format(self.rank,
-      self.total_batch_size if args.no_partition else self.batch_size,
-      self.num_batches), flush=True)
+    print("Batch size {}, num batches {}".format(self.batch_size, self.num_batches), flush=True)
 
     # Build the models
     self.encoder = EncoderCNN(args.embed_size)
     self.decoder = DecoderRNN(args.embed_size, args.hidden_size, len(vocab), args.num_layers)
-    if self.dist.is_gpu_rank():
-      self.encoder = self.encoder.cuda(self.local_rank)
-      self.decoder = self.decoder.cuda(self.local_rank)
+    if self.use_gpu:
+      self.encoder = self.encoder.cuda(0)
+      self.decoder = self.decoder.cuda(0)
 
     # Loss and optimizer
     criterion = nn.CrossEntropyLoss()
@@ -119,9 +90,9 @@ class Worker:
       batch_start_time = time.time()
       for i, (images, captions, lengths) in enumerate(data_loader):
         # Set mini-batch dataset
-        if self.dist.is_gpu_rank():
-          images = images.cuda(self.local_rank)
-          captions = captions.cuda(self.local_rank)
+        if self.use_gpu:
+          images = images.cuda(0)
+          captions = captions.cuda(0)
         targets = pack_padded_sequence(captions, lengths, batch_first=True)[0]
 
         # Forward, backward, all-reduce and optimize
@@ -131,8 +102,6 @@ class Worker:
         self.decoder.zero_grad()
         self.encoder.zero_grad()
         loss.backward()
-        if not args.no_partition:
-          self.average_gradients()
         optimizer.step()
 
         batch_time = time.time() - batch_start_time
@@ -141,8 +110,8 @@ class Worker:
 
         # Print log info
         if i % args.log_step == 0 and i != 0:
-          print('Rank [{}], Epoch [{}/{}], Step [{}/{}], Average time: {:.6f}, Loss: {:.4f}, Perplexity: {:5.4f}'
-                  .format(self.rank, epoch, args.num_epochs, i, total_step, batch_time_sum / processed_batches, loss.item(), np.exp(loss.item())), flush=True)
+          print('Epoch [{}/{}], Step [{}/{}], Average time: {:.6f}, Loss: {:.4f}, Perplexity: {:5.4f}'
+                  .format(epoch, args.num_epochs, i, total_step, batch_time_sum / processed_batches, loss.item(), np.exp(loss.item())), flush=True)
           batch_time_sum = 0
           processed_batches = 0
 
@@ -173,10 +142,9 @@ def main():
 
   parser.add_argument('-e', '--num-epochs', type=int, default=5)
   parser.add_argument('-b', '--batch-size', type=int, default=128)
-  parser.add_argument('-c', '--cpu-batch-size', type=int, default=24)
   parser.add_argument('-l', '--learning-rate', type=float, default=0.001)
-  parser.add_argument('-g', '--gpu-only', action='store_true', default=False, help="use only GPU workers, number of ranks should be the same as the number of GPUs")
-  parser.add_argument('--no-partition', action='store_true', default=False, help="do not partition the batch across workers, used for performance comparison")
+  parser.add_argument('-g', '--use-gpu', action='store_true', default=False, help="use GPU")
+  parser.add_argument('-m', '--use-mpi', action='store_true', default=False, help="use MPI")
 
   args = parser.parse_args()
   print(args, flush=True)

@@ -71,71 +71,75 @@ struct DistManager {
   int local_size;
   int n_nodes;
   int n_gpus;
+  bool single;
 
-  DistManager(bool gpu_only) {
+  DistManager(bool gpu_only, bool single_) {
     local_rank = 0;
     local_size = 0;
+    single = single_;
 
     MPI_CHECK(MPI_Init(NULL, NULL));
     MPI_CHECK(MPI_Comm_rank(MPI_COMM_WORLD, &rank));
     MPI_CHECK(MPI_Comm_size(MPI_COMM_WORLD, &world_size));
 
-    // Calculate local rank and size based on hostname
-    uint64_t hostHashs[world_size];
-    char hostname[1024];
-    getHostName(hostname, 1024);
-    hostHashs[rank] = getHostHash(hostname);
-    MPI_CHECK(MPI_Allgather(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, hostHashs,
-          sizeof(uint64_t), MPI_BYTE, MPI_COMM_WORLD));
-    for (int p = 0; p < world_size; p++) {
-      if (p == rank) break;
-      if (hostHashs[p] == hostHashs[rank]) local_rank++;
-    }
-    for (int p = 0; p < world_size; p++) {
-      if (hostHashs[p] == hostHashs[rank]) local_size++;
-    }
-    n_nodes = world_size / local_size;
+    if (!single) {
+      // Calculate local rank and size based on hostname
+      uint64_t hostHashs[world_size];
+      char hostname[1024];
+      getHostName(hostname, 1024);
+      hostHashs[rank] = getHostHash(hostname);
+      MPI_CHECK(MPI_Allgather(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, hostHashs,
+            sizeof(uint64_t), MPI_BYTE, MPI_COMM_WORLD));
+      for (int p = 0; p < world_size; p++) {
+        if (p == rank) break;
+        if (hostHashs[p] == hostHashs[rank]) local_rank++;
+      }
+      for (int p = 0; p < world_size; p++) {
+        if (hostHashs[p] == hostHashs[rank]) local_size++;
+      }
+      n_nodes = world_size / local_size;
 
-    CUDA_CHECK(cudaGetDeviceCount(&n_gpus));
-    if (is_gpu_rank()) {
-      CUDA_CHECK(cudaSetDevice(local_rank));
+      CUDA_CHECK(cudaGetDeviceCount(&n_gpus));
+      if (is_gpu_rank()) {
+        CUDA_CHECK(cudaSetDevice(local_rank));
+      }
+      else {
+        CUDA_CHECK(cudaSetDevice(0));
+      }
+
+      printf("rank %d, world_size %d, local_rank %d, local_size %d, n_nodes %d, n_gpus %d\n",
+          rank, world_size, local_rank, local_size, n_nodes, n_gpus);
+
+      // Create communicators for intra-node and inter-node communication
+      if (!gpu_only) {
+        MPI_CHECK(MPI_Comm_split(MPI_COMM_WORLD, floor(rank / local_size), rank, &intra_comm));
+        MPI_CHECK(MPI_Comm_group(MPI_COMM_WORLD, &world_group));
+        int* inter_ranks = (int*)malloc(sizeof(int) * n_nodes);
+        for (int i = 0; i < n_nodes; i++)
+          inter_ranks[i] = i * local_size + n_gpus;
+        MPI_CHECK(MPI_Group_incl(world_group, n_nodes, inter_ranks, &inter_group));
+        MPI_CHECK(MPI_Comm_create_group(MPI_COMM_WORLD, inter_group, 0, &inter_comm));
+      }
+
+      // Initialize NCCL
+      int gpu_rank = ((rank - local_rank) / local_size * n_gpus) + local_rank;
+      int n_gpu_ranks = n_nodes * n_gpus;
+      if (rank == 0) NCCL_CHECK(ncclGetUniqueId(&nccl_id));
+      MPI_CHECK(MPI_Bcast((void*)&nccl_id, sizeof(ncclUniqueId), MPI_BYTE, 0, MPI_COMM_WORLD));
+      NCCL_CHECK(ncclCommInitRank(&nccl_comm, world_size, nccl_id, rank));
+
+      int nccl_count, nccl_device, nccl_rank;
+      NCCL_CHECK(ncclCommCount(nccl_comm, &nccl_count));
+      NCCL_CHECK(ncclCommCuDevice(nccl_comm, &nccl_device));
+      NCCL_CHECK(ncclCommUserRank(nccl_comm, &nccl_rank));
+      printf("[Rank %d] NCCL comm count: %d, device: %d, user rank: %d\n", rank, nccl_count, nccl_device, nccl_rank);
     }
-    else {
-      CUDA_CHECK(cudaSetDevice(0));
-    }
-
-    printf("rank %d, world_size %d, local_rank %d, local_size %d, n_nodes %d, n_gpus %d\n",
-        rank, world_size, local_rank, local_size, n_nodes, n_gpus);
-
-    // Create communicators for intra-node and inter-node communication
-    if (!gpu_only) {
-      MPI_CHECK(MPI_Comm_split(MPI_COMM_WORLD, floor(rank / local_size), rank, &intra_comm));
-      MPI_CHECK(MPI_Comm_group(MPI_COMM_WORLD, &world_group));
-      int* inter_ranks = (int*)malloc(sizeof(int) * n_nodes);
-      for (int i = 0; i < n_nodes; i++)
-        inter_ranks[i] = i * local_size + n_gpus;
-      MPI_CHECK(MPI_Group_incl(world_group, n_nodes, inter_ranks, &inter_group));
-      MPI_CHECK(MPI_Comm_create_group(MPI_COMM_WORLD, inter_group, 0, &inter_comm));
-    }
-
-    // Initialize NCCL
-    int gpu_rank = ((rank - local_rank) / local_size * n_gpus) + local_rank;
-    int n_gpu_ranks = n_nodes * n_gpus;
-    if (rank == 0) NCCL_CHECK(ncclGetUniqueId(&nccl_id));
-    MPI_CHECK(MPI_Bcast((void*)&nccl_id, sizeof(ncclUniqueId), MPI_BYTE, 0, MPI_COMM_WORLD));
-    NCCL_CHECK(ncclCommInitRank(&nccl_comm, world_size, nccl_id, rank));
-
-    int nccl_count, nccl_device, nccl_rank;
-    NCCL_CHECK(ncclCommCount(nccl_comm, &nccl_count));
-    NCCL_CHECK(ncclCommCuDevice(nccl_comm, &nccl_device));
-    NCCL_CHECK(ncclCommUserRank(nccl_comm, &nccl_rank));
-    printf("[Rank %d] NCCL comm count: %d, device: %d, user rank: %d\n", rank, nccl_count, nccl_device, nccl_rank);
 
     MPI_CHECK(MPI_Barrier(MPI_COMM_WORLD));
   }
 
   ~DistManager() {
-    NCCL_CHECK(ncclCommDestroy(nccl_comm));
+    if (!single) NCCL_CHECK(ncclCommDestroy(nccl_comm));
     MPI_CHECK(MPI_Finalize());
   }
 
@@ -217,7 +221,7 @@ struct DistManager {
 
 PYBIND11_MODULE(dist, m) {
   py::class_<DistManager>(m, "DistManager")
-    .def(py::init<bool>())
+    .def(py::init<bool, bool>())
     .def("get_rank", &DistManager::get_rank)
     .def("get_world_size", &DistManager::get_world_size)
     .def("get_local_rank", &DistManager::get_local_rank)
