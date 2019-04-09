@@ -1388,8 +1388,8 @@ Rank [0], Epoch [1/5], Step [3220/3235], Average time: 0.864869, Loss: 2.0147, P
 Rank [1], Epoch [1/5], Step [3220/3235], Average time: 0.864918, Loss: 2.2621, Perplexity: 9.6029
 Rank [0], Epoch [1/5], Step [3230/3235], Average time: 0.884594, Loss: 2.2167, Perplexity: 9.1768
 Rank [1], Epoch [1/5], Step [3230/3235], Average time: 0.884650, Loss: 2.1967, Perplexity: 8.9954
-!!! Rank [0], Epoch [1], Time: 7252.347109, Loss: 2.0361, Perplexity: 7.6609
-!!! Rank [1], Epoch [1], Time: 7252.321740, Loss: 2.0259, Perplexity: 7.5827
+!!! Rank [0], Epoch [1], Time: 3012.447586, Loss: 2.0361, Perplexity: 7.6609
+!!! Rank [1], Epoch [1], Time: 3012.449544, Loss: 2.0259, Perplexity: 7.5827
 Rank [0], Epoch [2/5], Step [10/3235], Average time: 0.874480, Loss: 2.0570, Perplexity: 7.8223
 Rank [1], Epoch [2/5], Step [10/3235], Average time: 0.874540, Loss: 1.9808, Perplexity: 7.2486
 Rank [0], Epoch [2/5], Step [20/3235], Average time: 0.869290, Loss: 2.0528, Perplexity: 7.7897
@@ -2036,8 +2036,8 @@ Rank [0], Epoch [2/5], Step [3220/3235], Average time: 0.871733, Loss: 1.9889, P
 Rank [1], Epoch [2/5], Step [3220/3235], Average time: 0.871797, Loss: 1.9451, Perplexity: 6.9947
 Rank [0], Epoch [2/5], Step [3230/3235], Average time: 0.857611, Loss: 1.9322, Perplexity: 6.9047
 Rank [1], Epoch [2/5], Step [3230/3235], Average time: 0.857667, Loss: 1.8471, Perplexity: 6.3415
-!!! Rank [0], Epoch [2], Time: 10115.344779, Loss: 1.9768, Perplexity: 7.2198
-!!! Rank [1], Epoch [2], Time: 10115.319225, Loss: 2.1700, Perplexity: 8.7583
+!!! Rank [0], Epoch [2], Time: 2862.997670, Loss: 1.9768, Perplexity: 7.2198
+!!! Rank [1], Epoch [2], Time: 2862.997485, Loss: 2.1700, Perplexity: 8.7583
 Rank [0], Epoch [3/5], Step [10/3235], Average time: 0.866809, Loss: 1.7407, Perplexity: 5.7014
 Rank [1], Epoch [3/5], Step [10/3235], Average time: 0.866902, Loss: 1.7921, Perplexity: 6.0021
 Rank [0], Epoch [3/5], Step [20/3235], Average time: 0.804452, Loss: 1.9770, Perplexity: 7.2211
@@ -2684,8 +2684,8 @@ Rank [0], Epoch [3/5], Step [3220/3235], Average time: 0.806819, Loss: 1.9377, P
 Rank [1], Epoch [3/5], Step [3220/3235], Average time: 0.806867, Loss: 2.0267, Perplexity: 7.5891
 Rank [0], Epoch [3/5], Step [3230/3235], Average time: 0.849552, Loss: 1.9312, Perplexity: 6.8975
 Rank [1], Epoch [3/5], Step [3230/3235], Average time: 0.849596, Loss: 1.9797, Perplexity: 7.2407
-!!! Rank [0], Epoch [3], Time: 12858.029825, Loss: 1.9463, Perplexity: 7.0028
-!!! Rank [1], Epoch [3], Time: 12858.004328, Loss: 2.0247, Perplexity: 7.5740
+!!! Rank [0], Epoch [3], Time: 2742.685046, Loss: 1.9463, Perplexity: 7.0028
+!!! Rank [1], Epoch [3], Time: 2742.685103, Loss: 2.0247, Perplexity: 7.5740
 Rank [0], Epoch [4/5], Step [10/3235], Average time: 0.807532, Loss: 1.7998, Perplexity: 6.0485
 Rank [1], Epoch [4/5], Step [10/3235], Average time: 0.807594, Loss: 1.8233, Perplexity: 6.1920
 Rank [0], Epoch [4/5], Step [20/3235], Average time: 0.840936, Loss: 1.7647, Perplexity: 5.8397
