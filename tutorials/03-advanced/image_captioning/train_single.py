@@ -24,8 +24,8 @@ class Worker:
     if self.use_gpu:
       print("Current CUDA device: {}".format(torch.cuda.current_device()), flush=True)
     else:
-      num_threads = 32
-      torch.set_num_threads(num_threads)
+      num_threads = 30
+      #torch.set_num_threads(num_threads)
       print("Setting number of threads: {}".format(num_threads, flush=True))
 
   def init_dist(self):
@@ -85,8 +85,11 @@ class Worker:
     # Train the models
     total_step = len(data_loader)
     for epoch in range(args.num_epochs):
-      processed_batches = 0
+      epoch_start_time = time.time()
       batch_time_sum = 0
+      batch_time_total = 0
+      processed_batches = 0
+      processed_batches_total = 0
       batch_start_time = time.time()
       for i, (images, captions, lengths) in enumerate(data_loader):
         # Set mini-batch dataset
@@ -106,8 +109,11 @@ class Worker:
 
         batch_time = time.time() - batch_start_time
         batch_time_sum += batch_time
+        batch_time_total += batch_time
         processed_batches += 1
+        processed_batches_total += 1
 
+        saved_loss = loss.item()
         # Print log info
         if i % args.log_step == 0 and i != 0:
           print('Epoch [{}/{}], Step [{}/{}], Average time: {:.6f}, Loss: {:.4f}, Perplexity: {:5.4f}'
@@ -123,6 +129,10 @@ class Worker:
             args.model_path, 'encoder-{}-{}.ckpt'.format(epoch+1, i+1)))
 
         batch_start_time = time.time()
+
+      epoch_time = time.time() - epoch_start_time
+      print('!!! Epoch [{}], Time: {:.6f}, Average batch time: {:.6f}, Loss: {:.4f}, Perplexity: {:5.4f}'.format(
+        epoch, epoch_time, batch_time_total / processed_batches_total, saved_loss, np.exp(saved_loss)), flush=True)
 
 def main():
   # Training settings

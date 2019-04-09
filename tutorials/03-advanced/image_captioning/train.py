@@ -128,10 +128,12 @@ class Worker:
 
     # Train the models
     total_step = len(data_loader)
-    epoch_start_time = time.time()
     for epoch in range(args.num_epochs):
-      processed_batches = 0
+      epoch_start_time = time.time()
       batch_time_sum = 0
+      batch_time_total = 0
+      processed_batches = 0
+      processed_batches_total = 0
       batch_start_time = time.time()
       for i, (images, captions, lengths) in enumerate(data_loader):
         # Set mini-batch dataset
@@ -153,7 +155,9 @@ class Worker:
 
         batch_time = time.time() - batch_start_time
         batch_time_sum += batch_time
+        batch_time_total += batch_time
         processed_batches += 1
+        processed_batches_total += 1
 
         saved_loss = loss.item()
         # Print log info
@@ -173,7 +177,8 @@ class Worker:
         batch_start_time = time.time()
 
       epoch_time = time.time() - epoch_start_time
-      print('!!! Rank [{}], Epoch [{}], Time: {:.6f}, Loss: {:.4f}, Perplexity: {:5.4f}'.format(self.rank, epoch, epoch_time, saved_loss, np.exp(saved_loss)), flush=True)
+      print('!!! Rank [{}], Epoch [{}], Time: {:.6f}, Average batch time: {:.6f}, Loss: {:.4f}, Perplexity: {:5.4f}'.format(
+        self.rank, epoch, epoch_time, batch_time_total / processed_batches_total, saved_loss, np.exp(saved_loss)), flush=True)
 
 def main():
   # Training settings
