@@ -34,15 +34,15 @@ class Worker:
         extra_cuda_cflags=['-ccbin', 'g++', '-std=c++11', '-O3',
           #'-I/usr/mpi/gcc/openmpi-2.1.2-hfi/include',
           #'-I/usr/mpi/gcc/mvapich2-2.3b-hfi/include',
-          '-I/opt/intel/compilers_and_libraries_2017.4.196/linux/mpi/intel64/include',
-          #'-I/opt/intel/compilers_and_libraries_2017.4.196/linux/mpi/include64',
-          '-I/pylon5/ac7k4vp/jchoi157/pytorch/build/nccl/include'],
+          #'-I/opt/intel/compilers_and_libraries_2017.4.196/linux/mpi/intel64/include',
+          '-I/opt/intel/compilers_and_libraries_2018.5.274/linux/mpi/include64',
+          '-I/pylon5/ac7k4vp/jchoi157/pytorch-mpi/build/nccl/include'],
         extra_ldflags=['-L/opt/packages/cuda/9.2/lib64', '-lcudart', '-lrt',
           #'-L/usr/mpi/gcc/openmpi-2.1.2-hfi/lib64', '-lmpi',
           #'-L/usr/mpi/gcc/mvapich2-2.3b-hfi/lib', '-lmpi',
-          '-L/opt/intel/compilers_and_libraries_2017.4.196/linux/mpi/intel64/lib', '-lmpi',
-          #'-L/opt/intel/compilers_and_libraries_2017.4.196/linux/mpi/lib64', '-lmpi',
-          '-L/pylon5/ac7k4vp/jchoi157/pytorch/build/nccl/lib', '-lnccl'],
+          #'-L/opt/intel/compilers_and_libraries_2017.4.196/linux/mpi/intel64/lib', '-lmpi',
+          '-L/opt/intel/compilers_and_libraries_2018.5.274/linux/mpi/lib64', '-lmpi',
+          '-L/pylon5/ac7k4vp/jchoi157/pytorch-mpi/build/nccl/lib', '-lnccl'],
         build_directory="/home/jchoi157/torch_extensions"
         )
     self.dist = dist_module.DistManager(True, True)
